@@ -1,0 +1,6 @@
+margin = 77
+wrap-comments = true
+align-cases = true
+align-constructors-decl = true
+align-variants-decl = true
+parens-tuple = multi-line-only
