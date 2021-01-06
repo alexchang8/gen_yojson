@@ -1,4 +1,4 @@
 (executable
  (public_name gen_yojson)
  (name main)
- (libraries gen_yojson yojson))
+ (libraries gen_yojson yojson core))
