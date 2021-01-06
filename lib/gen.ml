@@ -81,7 +81,7 @@ let rec tree_of_json (json : Yojson.Basic.t) : tree =
           (List.hd sorted) (List.tl sorted)
       in
       Lst tpe
-  | `List []              -> failwith "unimplemented"
+  | `List []              -> failwith "fasdafds"
   | `Null                 -> failwith "unmplemented"
   | `String _             -> String
 
@@ -89,6 +89,7 @@ type lifted_field = {
   optional : bool;
   type_name : string;
   field_name : string;
+  fixed_name : string option;
 }
 
 and lifted =
@@ -109,8 +110,27 @@ let incr_name s =
 
 let ocaml_keywords = StringSet.of_list Keywords.ocaml_keywords_lst
 
+let valid_char = function
+  | 'a' .. 'z' | '0' .. '9' | '_' | 'A' .. 'Z' -> true
+  | _ -> false
+
+let string_for_all s f =
+  let rec h s f i =
+    if i >= String.length s then true else f s.[i] && h s f (i + 1)
+  in
+  h s f 0
+
+let valid_name s set =
+  if s = "" || StringSet.mem s set then false
+  else
+    match s.[0] with
+    | 'a' .. 'z' | '_' -> string_for_all s valid_char
+    | _                -> false
+
 let rec get_new_name suggested (next_generated, set) =
-  let bad_name s = StringSet.mem s set || StringSet.mem s ocaml_keywords in
+  let bad_name s =
+    (not (valid_name s set)) || StringSet.mem s ocaml_keywords
+  in
   match suggested with
   | None when bad_name next_generated ->
       let next_generated' = incr_name next_generated in
@@ -119,7 +139,10 @@ let rec get_new_name suggested (next_generated, set) =
       let next_generated' = incr_name next_generated in
       let set' = StringSet.add next_generated set in
       next_generated, (next_generated', set')
-  | Some s when bad_name s -> get_new_name None (next_generated, set)
+  | Some s when bad_name s ->
+      if s <> "" && s.[0] <> '_' then
+        get_new_name (Some ("_" ^ s)) (next_generated, set)
+      else get_new_name None (next_generated, set)
   | Some s -> s, (next_generated, StringSet.add s set)
 
 let hoist lst =
@@ -151,6 +174,7 @@ let lift tree =
                   optional = field.optional;
                   type_name = s;
                   field_name = field.name;
+                  fixed_name = None;
                 }
               in
               let field_map' = StringMap.add name lifted_field field_map in
@@ -181,6 +205,30 @@ let lift tree =
   let lifted, lst, _ = lift_tree tree [] ("a", StringSet.empty) (Some "t") in
   lifted, lst
 
+let rec gen_next_field next used =
+  if StringSet.mem next used then gen_next_field (incr_name next) used
+  else next, incr_name next
+
+let fix_field_name name next used =
+  if valid_name name used then name, next, StringSet.add name used
+  else
+    let s = "_" ^ name in
+    if valid_name s used then s, next, StringSet.add s used
+    else
+      let name', next' = gen_next_field next used in
+      name', next', StringSet.add name' used
+
+let fix_field_names lst =
+  let _, _, res =
+    List.fold_left
+      (fun (next, used, acc) x ->
+        let name, next', used' = fix_field_name x.field_name next used in
+        next', used', { x with field_name = name } :: acc)
+      ("a", StringSet.empty, [])
+      lst
+  in
+  res
+
 let lifted_toplevel_to_string = function
   | Inline _           -> failwith "should be no inline here"
   | Variant (s, types) ->
@@ -203,8 +251,8 @@ let lifted_toplevel_to_string = function
       Printf.sprintf "type %s = %s [@@deriving yojson]" s variant_s
   | Record (s, map)    ->
       let s_tpe =
-        map |> StringMap.bindings
-        |> List.map (fun (_, x) ->
+        map |> StringMap.bindings |> List.map snd |> fix_field_names
+        |> List.map (fun x ->
                let field_name, suffix =
                  if StringSet.mem x.field_name ocaml_keywords then
                    ( x.field_name ^ "_",
@@ -212,8 +260,8 @@ let lifted_toplevel_to_string = function
                  else x.field_name, ";"
                in
                if x.optional then
-                 Printf.sprintf "%s:(%s) option%s" field_name x.type_name
-                   suffix
+                 Printf.sprintf "%s:(%s) option [@default None]%s" field_name
+                   x.type_name suffix
                else Printf.sprintf "%s:%s%s" field_name x.type_name suffix)
       in
       let record_contents = String.concat "\n    " s_tpe in
