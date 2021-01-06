@@ -8,21 +8,23 @@ let ic_to_string ic =
   ic_to_string [] |> List.rev |> String.concat "\n"
 
 let exec_cmd cmd =
-  (* let ic, oc, ec = Unix.open_process_full cmd [||] in let output =
-     ic_to_string ic in let status = Unix.close_process_full (ic, oc, ec) in
-     output, status *)
   let ic = Unix.open_process_in cmd in
   let output = ic_to_string ic in
   let status = Unix.close_process_in ic in
   output, status
 
 let ocamlformat s =
+  let tmp_name, tmp_oc = Filename.open_temp_file "tmp" ".ml" in
+  output_string tmp_oc s;
+  flush tmp_oc;
+  close_out_noerr tmp_oc;
   let cmd =
     Printf.sprintf
-      {|echo "%s" 2>/dev/null | opam exec ocamlformat -- --name="foo.ml" --enable-outside-detected-project - 2>/dev/null|}
-      s
+      {|opam exec ocamlformat -- --enable-outside-detected-project %s 2>/dev/null|}
+      tmp_name
   in
   let output, status = exec_cmd cmd in
+  Sys.remove tmp_name;
   match status with
   | Unix.WEXITED 0   -> output
   | Unix.WEXITED 127 ->
