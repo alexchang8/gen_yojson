@@ -81,8 +81,8 @@ let rec tree_of_json (json : Yojson.Basic.t) : tree =
           (List.hd sorted) (List.tl sorted)
       in
       Lst tpe
-  | `List []              -> failwith "fasdafds"
-  | `Null                 -> failwith "unmplemented"
+  | `List []              -> failwith "unimplemented"
+  | `Null                 -> failwith "unimplemented"
   | `String _             -> String
 
 type lifted_field = {
@@ -96,6 +96,12 @@ and lifted =
   | Inline  of string
   | Variant of string * string list
   | Record  of string * lifted_field StringMap.t
+
+module MemoMap = Map.Make (struct
+  type t = tree
+
+  let compare = compare
+end)
 
 module StringSet = Set.Make (String)
 
@@ -156,53 +162,71 @@ let hoist lst =
   List.rev a, List.rev b
 
 let lift tree =
-  let rec lift tree acc names suggested_name =
-    let lifted, acc', names' = lift_tree tree acc names suggested_name in
+  let rec lift tree acc names suggested_name memo =
+    let lifted, acc', names', memo' =
+      lift_tree tree acc names suggested_name memo
+    in
     match lifted with
-    | Inline s            -> s, acc', names'
-    | Variant (s, _) as v -> s, v :: acc', names'
-    | Record (s, _) as r  -> s, r :: acc', names'
-  and lift_tree tree acc names suggested_name =
-    match tree with
-    | Assoc map   ->
-        let field_map, acc', names' =
-          List.fold_left
-            (fun (field_map, acc, names) (name, field) ->
-              let s, acc', names' = lift field.tpe acc names (Some name) in
-              let lifted_field =
-                {
-                  optional = field.optional;
-                  type_name = s;
-                  field_name = field.name;
-                  fixed_name = None;
-                }
+    | Inline s -> s, acc', names', memo'
+    | Variant (s, _) when MemoMap.mem tree memo -> s, acc', names', memo'
+    | Variant (s, _) as v -> s, v :: acc', names', memo'
+    | Record (s, _) when MemoMap.mem tree memo -> s, acc', names', memo'
+    | Record (s, _) as r -> s, r :: acc', names', memo'
+  and lift_tree tree acc names suggested_name memo =
+    match MemoMap.find_opt tree memo with
+    | Some x -> x, acc, names, memo
+    | None   ->
+        let lifted, acc', names', memo' =
+          match tree with
+          | Assoc map   ->
+              let field_map, acc', names', memo' =
+                List.fold_left
+                  (fun (field_map, acc, names, memo) (name, field) ->
+                    let s, acc', names', memo' =
+                      lift field.tpe acc names (Some name) memo
+                    in
+                    let lifted_field =
+                      {
+                        optional = field.optional;
+                        type_name = s;
+                        field_name = field.name;
+                        fixed_name = None;
+                      }
+                    in
+                    let field_map' =
+                      StringMap.add name lifted_field field_map
+                    in
+                    field_map', acc', names', memo')
+                  (StringMap.empty, acc, names, memo)
+                  (StringMap.bindings map)
               in
-              let field_map' = StringMap.add name lifted_field field_map in
-              field_map', acc', names')
-            (StringMap.empty, acc, names)
-            (StringMap.bindings map)
+              let type_name, names'' = get_new_name suggested_name names' in
+              Record (type_name, field_map), acc', names'', memo'
+          | Bool        -> Inline "bool", acc, names, memo
+          | Float       -> Inline "float", acc, names, memo
+          | Int         -> Inline "int", acc, names, memo
+          | Lst t       ->
+              let s, acc', names', memo' = lift t acc names None memo in
+              Inline (s ^ " list"), acc', names', memo'
+          | String      -> Inline "string", acc, names, memo
+          | Variant lst ->
+              let var_lst, acc', names', memo' =
+                List.fold_left
+                  (fun (var_lst, acc, names, memo) x ->
+                    let s, acc', names', memo' =
+                      lift x acc names None memo
+                    in
+                    s :: var_lst, acc', names', memo')
+                  ([], acc, names, memo) lst
+              in
+              let type_name, names'' = get_new_name suggested_name names' in
+              Variant (type_name, var_lst), acc', names'', memo'
         in
-        let type_name, names'' = get_new_name suggested_name names' in
-        Record (type_name, field_map), acc', names''
-    | Bool        -> Inline "bool", acc, names
-    | Float       -> Inline "float", acc, names
-    | Int         -> Inline "int", acc, names
-    | Lst t       ->
-        let s, acc', names' = lift t acc names None in
-        Inline (s ^ " list"), acc', names'
-    | String      -> Inline "string", acc, names
-    | Variant lst ->
-        let var_lst, acc', names' =
-          List.fold_left
-            (fun (var_lst, acc, names) x ->
-              let s, acc', names' = lift x acc names None in
-              s :: var_lst, acc', names')
-            ([], acc, names) lst
-        in
-        let type_name, names'' = get_new_name suggested_name names' in
-        Variant (type_name, var_lst), acc', names''
+        lifted, acc', names', MemoMap.add tree lifted memo'
   in
-  let lifted, lst, _ = lift_tree tree [] ("a", StringSet.empty) (Some "t") in
+  let lifted, lst, _, _ =
+    lift_tree tree [] ("a", StringSet.empty) (Some "t") MemoMap.empty
+  in
   lifted, lst
 
 let rec gen_next_field next used =
