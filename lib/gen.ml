@@ -206,7 +206,8 @@ let lift tree =
           | Float       -> Inline "float", acc, names, memo
           | Int         -> Inline "int", acc, names, memo
           | Lst t       ->
-              let s, acc', names', memo' = lift t acc names None memo in
+              let elt_name = Option.map (fun x -> x ^ "_elt") suggested_name in
+              let s, acc', names', memo' = lift t acc names elt_name memo in
               Inline (s ^ " list"), acc', names', memo'
           | String      -> Inline "string", acc, names, memo
           | Variant lst ->
