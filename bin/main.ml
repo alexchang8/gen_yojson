@@ -54,13 +54,11 @@ let () =
   if num_args = 2 then
     match Sys.argv.(1) with
     | "-h" | "--help" -> Printf.printf "%s\n\n  %s\n" summary usage
-    | ""              ->
+    | "" ->
         Printf.eprintf "Error: filename must be nonempty\n";
         exit 1
-    | x when String.length x >= 2 && x.[0] == '-' ->
-      begin
+    | x when String.length x >= 2 && x.[0] = '-' ->
         Printf.eprintf "%s: unknown option '%s'\n" exec_name x;
-        Printf.eprintf "Usage: %s\n"  usage
-      end
-    | f               -> run f
+        Printf.eprintf "Usage: %s\n" usage
+    | f -> run f
   else print_endline ("Expected a single arg. Usage: " ^ usage)
