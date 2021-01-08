@@ -37,17 +37,30 @@ let ocamlformat s =
 let run s =
   let contents =
     match s with
-    | "-"      -> Core.In_channel.input_all Core.In_channel.stdin
-    | filename -> Core.In_channel.read_all filename
+    | "-"      -> ic_to_string stdin
+    | filename ->
+        let ic = open_in filename in
+        let res = ic_to_string ic in
+        close_in ic;
+        res
   in
   contents |> Gen_yojson.Gen.gen_types |> ocamlformat |> print_endline
 
-let command =
-  let open Core.Command.Spec in
-  Core.Command.basic_spec ~summary:"Generate OCaml types given a json object"
-    ( empty
-    +> anon (maybe_with_default "-" ("json file" %: Core.Filename.arg_type))
-    )
-    (fun file_name () -> run file_name)
-
-let () = Core.Command.run ~version:"0.0.1" command
+let () =
+  let num_args = Array.length Sys.argv in
+  let summary = "Generate OCaml types given a json object" in
+  let exec_name = Filename.basename Sys.argv.(0) in
+  let usage = Printf.sprintf "%s [JSON FILE]" exec_name in
+  if num_args = 2 then
+    match Sys.argv.(1) with
+    | "-h" | "--help" -> Printf.printf "%s\n\n  %s\n" summary usage
+    | ""              ->
+        Printf.eprintf "Error: filename must be nonempty\n";
+        exit 1
+    | x when String.length x >= 2 && x.[0] == '-' ->
+      begin
+        Printf.eprintf "%s: unknown option '%s'\n" exec_name x;
+        Printf.eprintf "Usage: %s\n"  usage
+      end
+    | f               -> run f
+  else print_endline ("Expected a single arg. Usage: " ^ usage)
