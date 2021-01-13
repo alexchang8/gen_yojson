@@ -5,3 +5,8 @@ The types are annotated with
 [ppx_deriving_yojson](https://github.com/ocaml-ppx/ppx_deriving_yojson) to automatically
 generate serializers and deserializers using [yojson](https://github.com/ocaml-community/yojson). This project was inspired by
 [MakeTypes](https://jvilk.com/MakeTypes/) for TypeScript.
+
+TODO:
+- some better names (i.e. elements)
+- minor bugs: keys with spaces have field name changed, but are not annotated w/ `@key`
+- add some tests

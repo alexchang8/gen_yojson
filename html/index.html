@@ -12,6 +12,84 @@
   </style>
 </head>
 <body style="padding-top:100px;">
+<div class="container">
+  <div class="row">
+    <h3>JSON input</h3>
+    <div id="json-area" style="opacity:0"></div>
+  </div>
+  <div class="row">
+    <h3>Output</h3>
+    <div id="output-area" style="opacity:0"></div>
+    <button id="evaluate" class="btn btn-primary">Evaluate!</button>
+  </div>
+</div>
+<script src="https://pagecdn.io/lib/ace/1.4.8/ace.js" type="text/javascript" charset="utf-8"></script>
 <script src="ocamlformat.bc.js"></script>
+<script src="main.bc.js"></script>
+<script>
+  const json_editor = ace.edit("json-area")
+  const output_editor = ace.edit("output-area")
+  json_editor.setTheme("ace/theme/xcode");
+  json_editor.container.style.opacity = "";
+  json_editor.setFontSize("12px");
+  json_editor.setShowPrintMargin(false);
+  json_editor.setOptions({
+      maxLines: 40,
+      mode: "ace/mode/json",
+      autoScrollEditorIntoView: true
+  });
+  output_editor.setTheme("ace/theme/xcode");
+  output_editor.container.style.opacity = "";
+  output_editor.setFontSize("12px");
+  output_editor.setShowPrintMargin(false);
+  output_editor.setOptions({
+      maxLines: 40,
+      mode: "ace/mode/ocaml",
+      autoScrollEditorIntoView: true
+  });
+  const button = document.getElementById("evaluate");
+  button.onclick = () => {
+    const res = Ocamlformat.format(GenYojson.gen(json_editor.getValue()));
+    output_editor.setValue(res, -1);
+  }
+  const example = `{
+  "coord": {
+    "lon": 14.42,
+    "lat": 50.09
+  },
+  "weather": [
+    {
+      "id": 802,
+      "main": "Clouds",
+      "description": "scattered clouds",
+      "icon": "03d"
+    }
+  ],
+  "base": "cmc stations",
+  "main": {
+    "temp": 5,
+    "pressure": 1010,
+    "humidity": 100,
+    "temp_min": 5,
+    "temp_max": 5
+  },
+  "wind": { "speed": 1.5, "deg": 150 },
+  "clouds": { "all": 32 },
+  "dt": 1460700000,
+  "sys": {
+    "type": 1,
+    "id": 5889,
+    "message": 0.0033,
+    "country": "CZ",
+    "sunrise": 1460693287,
+    "sunset": 1460743037
+  },
+  "id": 3067696,
+  "name": "Prague",
+  "cod": 200
+}`
+  json_editor.setValue(example, -1);
+  button.click();
+</script>
 </body>
 </html>
