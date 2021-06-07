@@ -1,5 +1,4 @@
-# gen_yojson [WIP]
-
+# gen_yojson
 `gen_yojson` is a command-line and web utility for generating ocaml types based on a JSON object.
 The types are annotated with
 [ppx_deriving_yojson](https://github.com/ocaml-ppx/ppx_deriving_yojson) to automatically
@@ -10,5 +9,4 @@ A web version, made possible with jsoo is available at: https://alexchang8.githu
 
 TODO:
 - some better names (i.e. elements)
-- minor bugs: keys with spaces have field name changed, but are not annotated w/ `@key`
-- add some tests
+- keys with spaces have field name changed, but are not annotated w/ `@key`
