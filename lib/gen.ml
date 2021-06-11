@@ -174,78 +174,75 @@ let lifted_typename = function
   | Inline s | Variant (s, _) | Record (s, _) -> s
 
 let lift tree =
-  (*acc names suggested_name memo*)
-  let rec lift tree (state : state) =
-    let lifted, (state' : state) = lift_tree tree state in
-    let s, state'' =
-      match lifted with
-      | Inline s -> s, state'
-      | (Variant (s, _) | Record (s, _)) when MemoMap.mem tree state.memo ->
-          s, state'
-      | (Variant (s, _) as x) | (Record (s, _) as x) ->
-          s, { state' with acc = x :: state'.acc }
+  let rec lift_map map state =
+    let field_map, state' =
+      List.fold_left
+        (fun (field_map, state) (name, field) ->
+          let lifted, state' =
+            lift_tree field.tpe { state with suggested_name = Some name }
+          in
+          let s = lifted_typename lifted in
+          let lifted_field =
+            {
+              optional = field.optional;
+              type_name = s;
+              field_name = field.name;
+              fixed_name = None;
+            }
+          in
+          let field_map' = StringMap.add name lifted_field field_map in
+          field_map', state')
+        (StringMap.empty, state) (StringMap.bindings map)
     in
-    s, { state'' with suggested_name = None }
+    let type_name, names'' =
+      get_new_name state.suggested_name state'.names
+    in
+    Record (type_name, field_map), { state' with names = names'' }
+  and lift_lst t state =
+    let elt_name = Option.map (fun x -> x ^ "_elt") state.suggested_name in
+    let tree, state' =
+      lift_tree t { state with suggested_name = elt_name }
+    in
+    let s = lifted_typename tree in
+    Inline (s ^ " list"), state'
+  and lift_variant lst state =
+    let var_lst, state' =
+      List.fold_left
+        (fun (var_lst, acc_state) x ->
+          let tree, acc_state' =
+            lift_tree x { acc_state with suggested_name = None }
+          in
+          let s = lifted_typename tree in
+          s :: var_lst, acc_state')
+        ([], state) lst
+    in
+    let type_name, names'' =
+      get_new_name state.suggested_name state'.names
+    in
+    Variant (type_name, var_lst), { state' with names = names'' }
   and lift_tree tree (state : state) =
     match MemoMap.find_opt tree state.memo with
     | Some x -> x, state
     | None   ->
         let lifted, state' =
           match tree with
-          | Assoc map   ->
-              let field_map, state' =
-                List.fold_left
-                  (fun (field_map, state) (name, field) ->
-                    let s, state' =
-                      lift field.tpe
-                        { state with suggested_name = Some name }
-                    in
-                    let lifted_field =
-                      {
-                        optional = field.optional;
-                        type_name = s;
-                        field_name = field.name;
-                        fixed_name = None;
-                      }
-                    in
-                    let field_map' =
-                      StringMap.add name lifted_field field_map
-                    in
-                    field_map', state')
-                  (StringMap.empty, state) (StringMap.bindings map)
-              in
-              let type_name, names'' =
-                get_new_name state.suggested_name state'.names
-              in
-              Record (type_name, field_map), { state' with names = names'' }
+          | Assoc map   -> lift_map map state
           | Bool        -> Inline "bool", state
           | Float       -> Inline "float", state
           | Int         -> Inline "int", state
           | String      -> Inline "string", state
-          | Lst t       ->
-              let elt_name =
-                Option.map (fun x -> x ^ "_elt") state.suggested_name
-              in
-              let s, state' =
-                lift t { state with suggested_name = elt_name }
-              in
-              Inline (s ^ " list"), state'
-          | Variant lst ->
-              let var_lst, state' =
-                List.fold_left
-                  (fun (var_lst, acc_state) x ->
-                    let s, acc_state' =
-                      lift x { acc_state with suggested_name = None }
-                    in
-                    s :: var_lst, acc_state')
-                  ([], state) lst
-              in
-              let type_name, names'' =
-                get_new_name state.suggested_name state'.names
-              in
-              Variant (type_name, var_lst), { state' with names = names'' }
+          | Lst t       -> lift_lst t state
+          | Variant lst -> lift_variant lst state
         in
-        lifted, { state' with memo = MemoMap.add tree lifted state'.memo }
+        let acc'' =
+          match lifted with Inline _ -> state'.acc | x -> x :: state'.acc
+        in
+        ( lifted,
+          {
+            state' with
+            memo = MemoMap.add tree lifted state'.memo;
+            acc = acc'';
+          } )
   in
   let init_state =
     {
@@ -255,8 +252,8 @@ let lift tree =
       memo = MemoMap.empty;
     }
   in
-  let lifted, state' = lift_tree tree init_state in
-  lifted, state'.acc
+  let _, state' = lift_tree tree init_state in
+  state'.acc
 
 let rec gen_next_field next used =
   if StringSet.mem next used then gen_next_field (incr_name next) used
@@ -283,7 +280,7 @@ let fix_field_names lst =
   res
 
 let lifted_toplevel_to_string = function
-  | Inline _           -> failwith "should be no inline here"
+  | Inline s           -> "type t = " ^ s
   | Variant (s, types) ->
       let var_names =
         if List.for_all (fun x -> String.index_opt x ' ' = None) types then
@@ -324,11 +321,6 @@ let lifted_toplevel_to_string = function
 let gen_types s =
   let json = Yojson.Basic.from_string s in
   let tree = tree_of_json json in
-  let lifted, lst = lift tree in
+  let lst = lift tree in
   let types = List.map lifted_toplevel_to_string lst in
-  let root_str =
-    match lifted with
-    | Inline s -> "type t = " ^ s
-    | x        -> lifted_toplevel_to_string x
-  in
-  root_str :: types |> List.rev |> String.concat "\n"
+  types |> List.rev |> String.concat "\n"
