@@ -163,31 +163,42 @@ let hoist lst =
   let a, b = hoist_h lst ([], []) in
   List.rev a, List.rev b
 
-(* type params = { acc: lifted list; names: string * StringSet.t;
-   suggested_name: string option; memo: lifted MemoMap.t } *)
+type state = {
+  acc : lifted list;
+  names : string * StringSet.t;
+  suggested_name : string option;
+  memo : lifted MemoMap.t;
+}
+
+let lifted_typename = function
+  | Inline s | Variant (s, _) | Record (s, _) -> s
+
 let lift tree =
-  let rec lift tree acc names suggested_name memo =
-    let lifted, acc', names', memo' =
-      lift_tree tree acc names suggested_name memo
+  (*acc names suggested_name memo*)
+  let rec lift tree (state : state) =
+    let lifted, (state' : state) = lift_tree tree state in
+    let s, state'' =
+      match lifted with
+      | Inline s -> s, state'
+      | (Variant (s, _) | Record (s, _)) when MemoMap.mem tree state.memo ->
+          s, state'
+      | (Variant (s, _) as x) | (Record (s, _) as x) ->
+          s, { state' with acc = x :: state'.acc }
     in
-    match lifted with
-    | Inline s -> s, acc', names', memo'
-    | (Variant (s, _) | Record (s, _)) when MemoMap.mem tree memo ->
-        s, acc', names', memo'
-    | (Variant (s, _) as x) | (Record (s, _) as x) ->
-        s, x :: acc', names', memo'
-  and lift_tree tree acc names suggested_name memo =
-    match MemoMap.find_opt tree memo with
-    | Some x -> x, acc, names, memo
+    s, { state'' with suggested_name = None }
+  and lift_tree tree (state : state) =
+    match MemoMap.find_opt tree state.memo with
+    | Some x -> x, state
     | None   ->
-        let lifted, acc', names', memo' =
+        let lifted, state' =
           match tree with
           | Assoc map   ->
-              let field_map, acc', names', memo' =
+              let field_map, state' =
                 List.fold_left
-                  (fun (field_map, acc, names, memo) (name, field) ->
-                    let s, acc', names', memo' =
-                      lift field.tpe acc names (Some name) memo
+                  (fun (field_map, state) (name, field) ->
+                    let s, state' =
+                      lift field.tpe
+                        { state with suggested_name = Some name }
                     in
                     let lifted_field =
                       {
@@ -200,41 +211,52 @@ let lift tree =
                     let field_map' =
                       StringMap.add name lifted_field field_map
                     in
-                    field_map', acc', names', memo')
-                  (StringMap.empty, acc, names, memo)
-                  (StringMap.bindings map)
+                    field_map', state')
+                  (StringMap.empty, state) (StringMap.bindings map)
               in
-              let type_name, names'' = get_new_name suggested_name names' in
-              Record (type_name, field_map), acc', names'', memo'
-          | Bool        -> Inline "bool", acc, names, memo
-          | Float       -> Inline "float", acc, names, memo
-          | Int         -> Inline "int", acc, names, memo
+              let type_name, names'' =
+                get_new_name state.suggested_name state'.names
+              in
+              Record (type_name, field_map), { state' with names = names'' }
+          | Bool        -> Inline "bool", state
+          | Float       -> Inline "float", state
+          | Int         -> Inline "int", state
+          | String      -> Inline "string", state
           | Lst t       ->
               let elt_name =
-                Option.map (fun x -> x ^ "_elt") suggested_name
+                Option.map (fun x -> x ^ "_elt") state.suggested_name
               in
-              let s, acc', names', memo' = lift t acc names elt_name memo in
-              Inline (s ^ " list"), acc', names', memo'
-          | String      -> Inline "string", acc, names, memo
+              let s, state' =
+                lift t { state with suggested_name = elt_name }
+              in
+              Inline (s ^ " list"), state'
           | Variant lst ->
-              let var_lst, acc', names', memo' =
+              let var_lst, state' =
                 List.fold_left
-                  (fun (var_lst, acc, names, memo) x ->
-                    let s, acc', names', memo' =
-                      lift x acc names None memo
+                  (fun (var_lst, acc_state) x ->
+                    let s, acc_state' =
+                      lift x { acc_state with suggested_name = None }
                     in
-                    s :: var_lst, acc', names', memo')
-                  ([], acc, names, memo) lst
+                    s :: var_lst, acc_state')
+                  ([], state) lst
               in
-              let type_name, names'' = get_new_name suggested_name names' in
-              Variant (type_name, var_lst), acc', names'', memo'
+              let type_name, names'' =
+                get_new_name state.suggested_name state'.names
+              in
+              Variant (type_name, var_lst), { state' with names = names'' }
         in
-        lifted, acc', names', MemoMap.add tree lifted memo'
+        lifted, { state' with memo = MemoMap.add tree lifted state'.memo }
   in
-  let lifted, lst, _, _ =
-    lift_tree tree [] ("a", StringSet.empty) (Some "t") MemoMap.empty
+  let init_state =
+    {
+      acc = [];
+      names = "a", StringSet.empty;
+      suggested_name = Some "t";
+      memo = MemoMap.empty;
+    }
   in
-  lifted, lst
+  let lifted, state' = lift_tree tree init_state in
+  lifted, state'.acc
 
 let rec gen_next_field next used =
   if StringSet.mem next used then gen_next_field (incr_name next) used
