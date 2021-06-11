@@ -99,6 +99,10 @@ let make_gen_types_test ~name ~input ~expected =
 
 let tests =
   "gen_types test suite"
-  >::: [ make_gen_types_test ~name:"web test" ~input:json ~expected ]
+  >::: [
+         make_gen_types_test ~name:"web test" ~input:json ~expected;
+         make_gen_types_test ~name:"string lit" ~input:{|"foo"|}
+           ~expected:"type t = string";
+       ]
 
 let _ = run_test_tt_main tests

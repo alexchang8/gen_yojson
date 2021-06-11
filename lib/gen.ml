@@ -39,7 +39,10 @@ let rec merge_trees t1 t2 =
       in
       Assoc map
   | Variant v1, Variant v2 -> Variant (v1 @ v2)
-  | (Lst _ as a), (Lst _ as b) -> Variant [ a; b ]
+  | Lst a, Lst b ->
+      (* TODO: some metric here for whether this should be
+         Lst (Variant [a; b]), for now prefer merging*)
+      Lst (merge_trees a b)
   | a, b -> Variant [ a; b ]
 
 let rec tree_of_json (json : Yojson.Basic.t) : tree =
@@ -234,15 +237,14 @@ let lift tree =
           | Lst t       -> lift_lst t state
           | Variant lst -> lift_variant lst state
         in
-        let acc'' =
-          match lifted with Inline _ -> state'.acc | x -> x :: state'.acc
-        in
-        ( lifted,
+        let state'' =
           {
             state' with
             memo = MemoMap.add tree lifted state'.memo;
-            acc = acc'';
-          } )
+            acc = lifted :: state'.acc;
+          }
+        in
+        lifted, state''
   in
   let init_state =
     {
@@ -322,5 +324,14 @@ let gen_types s =
   let json = Yojson.Basic.from_string s in
   let tree = tree_of_json json in
   let lst = lift tree in
-  let types = List.map lifted_toplevel_to_string lst in
+  let types =
+    match lst with
+    | h :: t ->
+        let is_inline = function Inline _ -> false | _ -> true in
+        let tail =
+          List.filter is_inline t |> List.map lifted_toplevel_to_string
+        in
+        lifted_toplevel_to_string h :: tail
+    | []     -> []
+  in
   types |> List.rev |> String.concat "\n"
