@@ -92,7 +92,7 @@ type lifted_field = {
   fixed_name : string option;
 }
 
-and lifted =
+type lifted =
   | Inline  of string
   | Variant of string * string list
   | Record  of string * lifted_field StringMap.t
@@ -120,18 +120,20 @@ let valid_char = function
   | 'a' .. 'z' | '0' .. '9' | '_' | 'A' .. 'Z' -> true
   | _ -> false
 
-let string_for_all s f =
-  let rec h s f i =
-    if i >= String.length s then true else f s.[i] && h s f (i + 1)
+let explode s =
+  let rec h s i acc =
+    if i >= String.length s then acc else h s (i + 1) (s.[i] :: acc)
   in
-  h s f 0
+  h s 0 [] |> List.rev
+
+let first_char_valid = function 'a' .. 'z' | '_' -> true | _ -> false
 
 let valid_name s set =
-  if s = "" || StringSet.mem s set then false
-  else
-    match s.[0] with
-    | 'a' .. 'z' | '_' -> string_for_all s valid_char
-    | _                -> false
+  (not (StringSet.mem s set))
+  &&
+  match explode s with
+  | h :: t -> first_char_valid h && List.for_all valid_char t
+  | []     -> false
 
 let rec get_new_name suggested (next_generated, set) =
   let bad_name s =
@@ -161,6 +163,8 @@ let hoist lst =
   let a, b = hoist_h lst ([], []) in
   List.rev a, List.rev b
 
+(* type params = { acc: lifted list; names: string * StringSet.t;
+   suggested_name: string option; memo: lifted MemoMap.t } *)
 let lift tree =
   let rec lift tree acc names suggested_name memo =
     let lifted, acc', names', memo' =
@@ -168,10 +172,10 @@ let lift tree =
     in
     match lifted with
     | Inline s -> s, acc', names', memo'
-    | Variant (s, _) when MemoMap.mem tree memo -> s, acc', names', memo'
-    | Variant (s, _) as v -> s, v :: acc', names', memo'
-    | Record (s, _) when MemoMap.mem tree memo -> s, acc', names', memo'
-    | Record (s, _) as r -> s, r :: acc', names', memo'
+    | (Variant (s, _) | Record (s, _)) when MemoMap.mem tree memo ->
+        s, acc', names', memo'
+    | (Variant (s, _) as x) | (Record (s, _) as x) ->
+        s, x :: acc', names', memo'
   and lift_tree tree acc names suggested_name memo =
     match MemoMap.find_opt tree memo with
     | Some x -> x, acc, names, memo
@@ -287,12 +291,13 @@ let lifted_toplevel_to_string = function
                  else x.field_name, ";"
                in
                if x.optional then
-                 Printf.sprintf "%s:(%s) option [@default None]%s" field_name
+                 Printf.sprintf "%s : %s option [@default None]%s" field_name
                    x.type_name suffix
-               else Printf.sprintf "%s:%s%s" field_name x.type_name suffix)
+               else Printf.sprintf "%s : %s%s" field_name x.type_name suffix)
       in
-      let record_contents = String.concat "\n    " s_tpe in
-      Printf.sprintf "type %s = {%s} [@@deriving yojson]" s record_contents
+      let record_contents = String.concat "\n  " s_tpe in
+      Printf.sprintf "type %s = {\n  %s\n} [@@deriving yojson]\n" s
+        record_contents
 
 let gen_types s =
   let json = Yojson.Basic.from_string s in
